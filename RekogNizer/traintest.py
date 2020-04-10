@@ -2,7 +2,7 @@ import torch
 import torch.optim as optim
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.optim.lr_scheduler import StepLR, OneCycleLR, MultiStepLR, CyclicLR, _LRScheduler
+from torch.optim.lr_scheduler import StepLR, OneCycleLR, MultiStepLR, CyclicLR
 from RekogNizer import fileutils
 import wandb
 from tqdm import tqdm
@@ -15,9 +15,6 @@ import torchvision
 from RekogNizer import lrfinder
 from torch.optim.optimizer import Optimizer
 from torch._six import inf
-#from torch.optim.lr_scheduler import 
-
-
 
 class MyOwnReduceLROnPlateau(object):
     def __init__(self, optimizer, mode='min', factor=0.1, patience=10,
@@ -163,7 +160,7 @@ def show_misclassfied_images(model, imageloader, classes):
     return error_images, preds, actuals
 
 
-def find_lr_type2(model, optimizer, criterion, trainloader, testloader, seed=1, start_lr=0.0001, end_lr=100, step_mode="exp"):
+def find_lr_type2(model, optimizer, criterion, trainloader, testloader, seed=1, start_lr=0.0001, end_lr=100, step_mode="exp",num_iter=500):
     torch.manual_seed(1)
     lr_finder = lrfinder.LRFinder(model, optimizer, criterion, device="cuda")
     #lr_finder.range_test(imageloader, end_lr=100, num_iter=500, step_mode="exp")
@@ -177,10 +174,10 @@ def find_lr_type2(model, optimizer, criterion, trainloader, testloader, seed=1, 
     lr_finder.reset()
     return lr_finder
 
-def find_lr_type1(model, optimizer, criterion, imageloader, seed=1, start_lr=0.0001, end_lr=100, step_mode="exp",num_iter=500):
+def find_lr_type1(model, optimizer, criterion, imageloader, testloader=None, seed=1, start_lr=0.0001, end_lr=100, step_mode="exp",num_iter=500):
     torch.manual_seed(1)
     lr_finder = lrfinder.LRFinder(model, optimizer, criterion, device="cuda")
-    lr_finder.range_test(imageloader, end_lr=100, num_iter=num_iter, step_mode="exp")
+    lr_finder.range_test(imageloader, val_loader=testloader, start_lr=start_lr, end_lr=end_lr, num_iter=num_iter, step_mode="exp")
     min_loss = np.min(lr_finder.history['loss'])
     min_lr = lr_finder.history['lr'][np.argmin(lr_finder.history['loss'])]
     max_lr = np.max(lr_finder.history['lr'])
@@ -480,9 +477,9 @@ def execute_model(model_class, hyperparams,
                                                 device, test_loader,
                                                 criterion(reduction='sum'), 
                                                 classes,epoch)
-
-        print('\nEpoch: {:.0f} Train set: Average loss: {:.4f}, Accuracy: {:.3f}%'.format(
-        epoch, epoch_train_loss, epoch_train_acc))
+        last_lr = scheduler.get_last_lr()[0]
+        print('\nEpoch: {:.0f} Train set: Average loss: {:.4f}, Accuracy: {:.3f}%, lr:{}'.format(
+        epoch, epoch_train_loss, epoch_train_acc,last_lr))
         print('Epoch: {:.0f} Test set: Average loss: {:.4f}, Accuracy: {:.3f}%'.format(
         epoch, epoch_test_loss, epoch_test_acc))
         #myoptim = optimizer.state_dict()['param_groups'][0]
@@ -498,8 +495,8 @@ def execute_model(model_class, hyperparams,
                    "Train Loss": epoch_train_loss, 
                    "Test Accuracy":epoch_test_acc, 
                    "Test Loss": epoch_test_loss,
-                   "Learning Rate": config.lr})
-                   #"Learning Rate": scheduler.get_lr()})
+                   #"Learning Rate": config.lr})
+                   "Learning Rate": last_lr})
         
         if(save_best == True and epoch_test_acc > best_acc):
             print("Model saved as Test Accuracy increased from ", best_acc, " to ", epoch_test_acc)
@@ -519,160 +516,4 @@ def execute_model(model_class, hyperparams,
         
     print("Final model save path:",model_path," best Accuracy:",best_acc)
     wandb.save('model.h5')
-    return model_path
-
-
-class MyLinearLR(_LRScheduler):
-    """Linearly increases the learning rate between two boundaries over a number of
-    iterations.
-
-    Arguments:
-        optimizer (torch.optim.Optimizer): wrapped optimizer.
-        end_lr (float): the final learning rate.
-        num_iter (int): the number of iterations over which the test occurs.
-        last_epoch (int, optional): the index of last epoch. Default: -1.
-    """
-
-    def __init__(self, optimizer, end_lr, num_iter, last_epoch=-1):
-        self.end_lr = end_lr
-        self.num_iter = num_iter
-        super(LinearLR, self).__init__(optimizer, last_epoch)
-
-    def get_lr(self):
-        curr_iter = self.last_epoch + 1
-        r = curr_iter / self.num_iter
-        return [base_lr + r * (self.end_lr - base_lr) for base_lr in self.base_lrs]
-
-
-class MyExponentialLR(_LRScheduler):
-    """Exponentially increases the learning rate between two boundaries over a number of
-    iterations.
-
-    Arguments:
-        optimizer (torch.optim.Optimizer): wrapped optimizer.
-        end_lr (float): the final learning rate.
-        num_iter (int): the number of iterations over which the test occurs.
-        last_epoch (int, optional): the index of last epoch. Default: -1.
-    """
-
-    def __init__(self, optimizer, end_lr, num_iter, last_epoch=-1):
-        self.end_lr = end_lr
-        self.num_iter = num_iter
-        super(ExponentialLR, self).__init__(optimizer, last_epoch)
-
-    def get_lr(self):
-        curr_iter = self.last_epoch + 1
-        r = curr_iter / self.num_iter
-        return [base_lr * (self.end_lr / base_lr) ** r for base_lr in self.base_lrs]
-
-
-def range_test(model_class, hyperparams, 
-                  train_loader, test_loader, device, classes,
-                  optimizer_in=optim.SGD, 
-                  wandb = None,
-                  criterion=nn.CrossEntropyLoss,
-                  scheduler=None,prev_saved_model=None,
-                  save_best=False, batch_step=False, 
-                  lars_mode=False, 
-                  start_lr=0.0001, end_lr=100,
-                  **kwargs):
-    
-    if wandb is None:
-        hyperparams['run_name'] = fileutils.rand_run_name()
-        wandb.init(config=hyperparams, project=hyperparams['project'])
-    
-    #wandb.watch_called = False # Re-run the model without restarting the runtime, unnecessary after our next release
-    config = wandb.config
-    model_path = fileutils.generate_model_save_path(rand_string=config.run_name)
-    print("Model saved to: ",model_path)
-    #print("Hyper Params:")
-    #print(config)
-    use_cuda = not config.no_cuda and torch.cuda.is_available()
-    best_acc = 0.0
-    best_loss = 0.0
-    #device = torch.device("cuda" if use_cuda else "cpu")
-    kwargs = {'num_workers': 4, 'pin_memory': True} if use_cuda else {}
-    
-    # Set random seeds and deterministic pytorch for reproducibility
-    # random.seed(config.seed)       # python random seed
-    torch.manual_seed(config.seed) # pytorch random seed
-    # numpy.random.seed(config.seed) # numpy random seed
-    torch.backends.cudnn.deterministic = True
-
-    # Initialize our model, recursively go over all modules and convert their parameters and buffers to CUDA tensors (if device is set to cuda)
-    if(prev_saved_model != None):
-        # model = model_builder(model_class, 
-        #                       weights_path=prev_saved_model,    
-        #                       local_device=device)
-        model,best_acc = model_builder2(model_class, 
-                      weights_path=prev_saved_model,    
-                      local_device=device)
-        print("Model loaded from ", prev_saved_model, " with previous accuracy:",best_acc)
-    else:
-        #model = model_class(config.dropout).to(device)
-        model = model_class.to(device)
-    
-    #summary(model.to(device),input_size=(3, 32, 32))
-    optimizer = optimizer_in#(model.parameters(), lr=config.lr,momentum=config.momentum,
-                           #weight_decay=config.weight_decay) #
-    
-    ### We will skip LR-scheduler when using LARS because of unknown interactions
-    #if(lars_mode == True):
-        #optimizer = LARS(optimizer=base_optimizer, eps=1e-8, trust_coef=0.001)
-    #optimizer = LARS(optimizer=optimizer, eps=0.6, trust_coef=0.001)
-    #else:
-    scheduler = LinearLR(optimizer, end_lr, config.epochs)
-    #scheduler = CyclicLR(optimizer, base_lr=config.lr*0.01, max_lr=config.lr, mode='triangular', gamma=1.)#, cycle_momentum=False)#,step_size_up=1000)#, scale_fn='triangular',step_size_up=200)    
-
-    #scheduler = StepLR(optimizer, step_size=config.sched_lr_step, gamma=config.sched_lr_gamma)
-    
-
-    #scheduler = MultiStepLR(optimizer, milestones=[10,20], gamma=config.sched_lr_gamma)
-    # WandB â€“ wandb.watch() automatically fetches all layer dimensions, gradients, model parameters and logs them automatically to your dashboard.
-    # Using log="all" log histograms of parameter values in addition to gradients
-    #wandb.watch(model, log="all")
-
-    for epoch in range(1, config.epochs + 1):
-        #epoch_train_acc,epoch_train_loss = train(config, model, device, train_loader, optimizer,criterion(), epoch)
-
-        epoch_train_acc,epoch_train_loss = train(config, model, device, 
-                                                train_loader, optimizer,scheduler, 
-                                                criterion(), epoch,
-                                                batch_step=batch_step)   
-        epoch_test_acc,epoch_test_loss = test(config, model, 
-                                                device, test_loader,
-                                                criterion(reduction='sum'), 
-                                                classes,epoch)
-
-        print('\nEpoch: {:.0f} Train set: Average loss: {:.4f}, Accuracy: {:.3f}%'.format(
-        epoch, epoch_train_loss, epoch_train_acc))
-        print('Epoch: {:.0f} Test set: Average loss: {:.4f}, Accuracy: {:.3f}%'.format(
-        epoch, epoch_test_loss, epoch_test_acc))
-        #myoptim = optimizer.state_dict()['param_groups'][0]
-        #print('Epoch: {:.0f} Optimizer values: LR: {:.10f}, LastLR:{:.10f}, Momentum: {:.10f}, Weight Decay: {:.10f}'.format(
-        #epoch, scheduler.get_lr()[0],scheduler.get_last_lr()[0],myoptim['momentum'],myoptim['weight_decay']))
-
-        #print('Epoch: {:.0f} Optimizer values: LastLR:{:.10f}, Momentum: {:.10f}, Weight Decay: {:.10f}'.format(
-        #epoch, scheduler.get_last_lr()[0],myoptim['momentum'],myoptim['weight_decay']))
-
-        #stats_logger(global_stats_array, 1,0.1,99.0,0.1,98.0,0.001,0.78,0.00001)
-        
-        wandb.log({ "Train Accuracy": epoch_train_acc, 
-                   "Train Loss": epoch_train_loss, 
-                   "Test Accuracy":epoch_test_acc, 
-                   "Test Loss": epoch_test_loss,
-                   "Learning Rate": config.lr})
-                   #"Learning Rate": scheduler.get_lr()})
-        
-        if(save_best == True and epoch_test_acc > best_acc):
-            print("Test Accuracy increased from {} to {}".format(best_acc, epoch_test_acc))
-            print("Previous test loss {} new test loss {}".format(best_loss, epoch_test_loss))
-            best_acc = epoch_test_acc
-            best_loss = epoch_test_loss
-
-        print("Non CyclicLR Case")
-        scheduler.step(epoch_test_loss)
-        
-    print("Final model save path:",model_path," best Accuracy:",best_acc)
-    #wandb.save('model.h5')
     return model_path
