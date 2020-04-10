@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-   train_s9_new.py:
+   train_s11_new.py:
    Contains training using albumentation/Resnet and CIFAR10
 """
 
@@ -31,7 +31,7 @@ import torchvision.transforms as transforms
 import torchvision
 from albumentations import (
     HorizontalFlip, Compose, RandomCrop, Cutout,Normalize, HorizontalFlip, 
-    Resize,RandomSizedCrop, MotionBlur,PadIfNeeded,Flip
+    Resize,RandomSizedCrop, MotionBlur,PadIfNeeded,Flip, IAAFliplr,
 )
 from albumentations.pytorch import ToTensor
 import numpy as np
@@ -47,9 +47,10 @@ def main():
     
     hyperparams.hyperparameter_defaults['run_name'] = fileutils.rand_run_name()
     transform_train = Compose([
-        PadIfNeeded(min_height=40,min_width=40, always_apply=True, p=1.0,value=(0,0,0), border_mode=0),
+        PadIfNeeded(min_height=40,min_width=40, always_apply=True, p=1.0),#,value=(0,0,0), border_mode=0),
         RandomCrop(height=32,width=32, p=1),
-        Flip(p=0.5),
+        #Flip(p=0.5),
+        IAAFliplr(p=1),
         Cutout(num_holes=1,max_h_size=8,max_w_size=8,always_apply=True,p=1,fill_value=[0.4914*255, 0.4826*255, 0.44653*255]),
         Normalize(
         mean=[0.4914, 0.4826, 0.44653],
@@ -81,14 +82,14 @@ def main():
     scheduler = OneCycleLR(optimizer, 
                             config.ocp_max_lr, 
                             epochs=config.epochs, 
-                            cycle_momentum=True, 
+                            cycle_momentum=False, 
                             steps_per_epoch=len(trainloader), 
                             base_momentum=config.momentum,
                             max_momentum=0.95, 
                             pct_start=0.208,
-                            anneal_strategy='cos',
-                            div_factor=128,
-                            final_div_factor=128
+                            anneal_strategy=config.anneal_strategy,
+                            div_factor=config.div_factor,
+                            final_div_factor=config.final_div_factor
                            )
     
     
