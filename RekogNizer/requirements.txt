@@ -1,0 +1,9 @@
+pytorch-ignite
+torchsummary
+wandb
+#pandas
+numpy
+torch
+torchvision
+matplotlib
+albumentations
