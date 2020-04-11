@@ -1,5 +1,5 @@
 """
-     All model class definitions for MNIST
+     All model class definitions in EVA4
 """
 
 from __future__ import print_function
@@ -9,6 +9,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 import torchvision
 import torchvision.transforms as transforms
+
 
 class MNISTDigitBuilder(nn.Module):
     def __init__(self, dropout=0.1):
@@ -301,34 +302,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-class ModifiedResBlock(nn.Module):
-    expansion = 1
 
-    def __init__(self, in_planes, planes, stride=1):
-        super(ModifiedResBlock, self).__init__()
-        self.layerconv = nn.Sequential(
-            nn.Conv2d(in_planes, planes, kernel_size=3, stride=stride, padding=1, bias=False),
-            nn.MaxPool2d(2, 2),
-            nn.BatchNorm2d(planes),
-            nn.ReLU(),
-        )
-        ### This layer applies after the first conv and we intend to keep the channel size same
-        self.resconv = nn.Sequential(
-            nn.Conv2d(planes, planes, kernel_size=3, stride=stride, padding=1, bias=False),
-            nn.BatchNorm2d(planes),
-            nn.ReLU(),
-            nn.Conv2d(planes, planes, kernel_size=3, stride=stride, padding=1, bias=False),
-            nn.BatchNorm2d(planes),
-            nn.ReLU()
-            )
-        #self.shortcut = nn.Sequential() 
-
-    def forward(self, x):
-        out = self.layerconv(x)
-        res = self.resconv(out)
-        #out = res
-        #out = F.relu(out)
-        return out+res
 
 
 
@@ -442,6 +416,62 @@ def test():
     net = ResNet18()
     y = net(torch.randn(1,3,32,32))
     print(y.size())
+
+"""
+    ModifiedResBlock: Class for creating Modified ResNet block. Based on S11:
+        X = Conv 3x3 (s1, p1) >> MaxPool2D >> BN >> RELU
+        R1 = ResBlock( (Conv-BN-ReLU-Conv-BN-ReLU))(X) 
+        Add(X, R1)
+
+"""
+
+class ModifiedResBlock(nn.Module):
+    expansion = 1
+
+    def __init__(self, in_planes, planes, stride=1):
+        super(ModifiedResBlock, self).__init__()
+        self.layerconv = nn.Sequential(
+            nn.Conv2d(in_planes, planes, kernel_size=3, stride=stride, padding=1, bias=False),
+            nn.MaxPool2d(2, 2),
+            nn.BatchNorm2d(planes),
+            nn.ReLU(),
+        )
+        ### This layer applies after the first conv and we intend to keep the channel size same
+        self.resconv = nn.Sequential(
+            nn.Conv2d(planes, planes, kernel_size=3, stride=stride, padding=1, bias=False),
+            nn.BatchNorm2d(planes),
+            nn.ReLU(),
+            nn.Conv2d(planes, planes, kernel_size=3, stride=stride, padding=1, bias=False),
+            nn.BatchNorm2d(planes),
+            nn.ReLU()
+            )
+        #self.shortcut = nn.Sequential() 
+
+    def forward(self, x):
+        out = self.layerconv(x)
+        res = self.resconv(out)
+        #out = res
+        #out = F.relu(out)
+        return out+res
+
+"""
+    S11: Custom resnet block based model
+    It used the ModifiedResBlock which doesnt have multiple layers.
+    PrepLayer:
+        Conv 3x3 s1, p1) >> BN >> RELU [64]
+    Layer1:
+        ModifiedResBlock(128)
+    Layer 2:
+        Conv 3x3 [256]
+        MaxPooling2D
+        BN
+        ReLU
+    Layer 3:
+        ModifiedResBlock(512)
+    MaxPooling:(with Kernel Size 4) 
+    FC Layer 
+    SoftMax
+"""
 
 class S11ResNet(nn.Module):
     def __init__(self, num_classes=10,dropout=0.0):
